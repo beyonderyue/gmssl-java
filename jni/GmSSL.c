@@ -59,6 +59,7 @@
 #endif
 #ifndef OPENSSL_NO_SM2
 #include <openssl/sm2.h>
+#include "../crypto/sm2/sm2_lcl.h"
 #endif
 #include <openssl/x509.h>
 #include <openssl/stack.h>
@@ -170,7 +171,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_yzz_gmssl_GmSSL_getPublicKey(JNIEnv *env, 
 }
 JNIEXPORT jbyteArray JNICALL Java_com_yzz_gmssl_GmSSL_generateKeyPair(JNIEnv *env, jobject this, jboolean compressed)
 {
-    jbyteArray ret = NULL;
+	jbyteArray ret = NULL;
 	EC_GROUP *egp = NULL;
 	EC_KEY *ekey = NULL;
 	BIGNUM *priv = NULL;
@@ -215,7 +216,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_yzz_gmssl_GmSSL_generateKeyPair(JNIEnv *en
 	}
 	if ((ecp = EC_KEY_get0_public_key(ekey)) == NULL) {
 		JNIerr(JNI_F_JAVA_GMSSL_GENERATEKEYPAIR, ERR_R_MALLOC_FAILURE);
-		goto end;		
+		goto end;
 	}
     int point_form = is_compressed?POINT_CONVERSION_COMPRESSED:POINT_CONVERSION_UNCOMPRESSED;
 
@@ -1298,6 +1299,179 @@ end:
 	EC_POINT_free(ecp);
 	return ret;
 }
+
+JNIEXPORT jbyteArray JNICALL Java_com_yzz_gmssl_GmSSL_calculateSharedKey(JNIEnv *env, jobject this,
+    jbyteArray privateKey, jbyteArray ephemeralPrivKey, jstring uid, jbyteArray remotePubkey, jbyteArray remoteEphemeralPubkey, jstring ruid, jint keylen, jint initiator)
+{
+	jbyteArray ret = NULL;
+	const char* uidbuf = NULL;
+	const char* ruidbuf = NULL;
+	unsigned char *privkeybuf = NULL;
+	unsigned char *rpubkeybuf = NULL;
+	unsigned char *emprikeybuf = NULL;
+	unsigned char *repubkeybuf = NULL;
+	EC_GROUP *egp = NULL;
+	EC_KEY *privKey = NULL;
+	EC_KEY *remoteKey = NULL;
+	EC_KEY *remoteEmpheralKey = NULL;
+	EC_POINT *ecp = NULL;
+	EC_POINT *ecpempheral = NULL;
+	int privlen, rpubkeylen, emprivlen, republen;
+	int is_initiator = initiator;
+	int klen = keylen;
+	if (!(uidbuf = (*env)->GetStringUTFChars(env, uid, 0))) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, JNI_R_BAD_ARGUMENT);
+		goto end;
+	}
+	if (!(ruidbuf = (*env)->GetStringUTFChars(env, ruid, 0))) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, JNI_R_BAD_ARGUMENT);
+		goto end;
+	}
+	if (!(privkeybuf = (unsigned char *)(*env)->GetByteArrayElements(env, privateKey, 0))) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, JNI_R_BAD_ARGUMENT);
+		goto end;
+	}
+	if ((privlen = (*env)->GetArrayLength(env, privateKey)) <= 0) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, JNI_R_BAD_ARGUMENT);
+		goto end;
+	}
+	if (!(rpubkeybuf = (unsigned char *)(*env)->GetByteArrayElements(env, remotePubkey, 0))) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, JNI_R_BAD_ARGUMENT);
+		goto end;
+	}
+	if ((rpubkeylen = (*env)->GetArrayLength(env, remotePubkey)) <= 0) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, JNI_R_BAD_ARGUMENT);
+		goto end;
+	}
+	if (!(emprikeybuf = (unsigned char *)(*env)->GetByteArrayElements(env, ephemeralPrivKey, 0))) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, JNI_R_BAD_ARGUMENT);
+		goto end;
+	}
+	if ((emprivlen = (*env)->GetArrayLength(env, ephemeralPrivKey)) <= 0) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, JNI_R_BAD_ARGUMENT);
+		goto end;
+	}
+	if (!(repubkeybuf = (unsigned char *)(*env)->GetByteArrayElements(env, remoteEphemeralPubkey, 0))) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, JNI_R_BAD_ARGUMENT);
+		goto end;
+	}
+	if ((republen = (*env)->GetArrayLength(env, remoteEphemeralPubkey)) <= 0) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, JNI_R_BAD_ARGUMENT);
+		goto end;
+	}	
+	if(!(egp = EC_GROUP_new_by_curve_name(NID_sm2p256v1))) {
+        JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_MALLOC_FAILURE);
+		goto end;
+	}
+	if(!(privKey = EC_KEY_new_by_curve_name(NID_sm2p256v1))) {
+        JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_MALLOC_FAILURE);
+		goto end;
+	}
+	if(!(remoteKey = EC_KEY_new_by_curve_name(NID_sm2p256v1))) {
+        JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_MALLOC_FAILURE);
+		goto end;
+	}
+	if(!(remoteEmpheralKey = EC_KEY_new_by_curve_name(NID_sm2p256v1))) {
+        JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_MALLOC_FAILURE);
+		goto end;
+	}
+
+	if(!EC_KEY_set_group(privKey, egp)) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_EC_LIB);
+		goto end;
+	}
+	if(!EC_KEY_set_group(remoteKey, egp)) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_EC_LIB);
+		goto end;
+	}
+	if(!EC_KEY_set_group(remoteEmpheralKey, egp)) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_EC_LIB);
+		goto end;
+	}
+
+	SM2_KAP_CTX *ctx = NULL;
+
+	ctx = (SM2_KAP_CTX*)OPENSSL_malloc(sizeof(*ctx));
+
+	BIGNUM *priv = NULL;
+	if (!(priv = BN_bin2bn(privkeybuf, 32, priv))) {
+        JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_MALLOC_FAILURE);
+		goto end;
+	}
+	
+	if (!EC_KEY_set_private_key(privKey, priv)) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_EC_LIB);
+		goto end;
+	}
+	if (!ec_key_simple_generate_public_key(privKey)) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_EC_LIB);
+		goto end;
+	}
+    BIGNUM *x = NULL;
+	BIGNUM *y = NULL;
+
+	if (!(ecp = EC_POINT_new(egp))) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_EC_LIB);
+		goto end;
+	}
+	if (!(ecpempheral = EC_POINT_new(egp))) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_EC_LIB);
+		goto end;
+	}
+	if (rpubkeylen == 65) {
+        if (!EC_POINT_set_affine_coordinates_GFp(egp, ecp, BN_bin2bn(&rpubkeybuf[1], 32, x), BN_bin2bn(&rpubkeybuf[33], 32, y), BN_CTX_new())) {
+		    JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_EC_LIB);
+		    goto end;
+		}
+	} else {
+        if (!EC_POINT_set_compressed_coordinates_GFp(egp, ecp, BN_bin2bn(&rpubkeybuf[1], 32, x), rpubkeybuf[0]&1, BN_CTX_new())) {
+		    JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_EC_LIB);
+		    goto end;
+		}
+	}
+	if (!EC_KEY_set_public_key(remoteKey, ecp)) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_EC_LIB);
+		goto end;
+	}	
+	BIGNUM *dA = NULL;
+	if (!(dA = BN_bin2bn(emprikeybuf, 32, dA))) {
+        JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_MALLOC_FAILURE);
+		goto end;
+	}
+	SM2_KAP_CTX_init(ctx, privKey, uidbuf, strlen(uidbuf), remoteKey, ruidbuf, strlen(ruidbuf), is_initiator, 0);
+
+	SM2_KAP_prepare_no_rand(ctx, dA);
+	//SM2_KAP_prepare(ctx, RA, &RAlen);
+
+    unsigned char *sharekey = (unsigned char*)OPENSSL_malloc(klen*2);
+	char checksum[256];
+	int checksumlen;
+	SM2_KAP_compute_key(ctx, repubkeybuf, republen, sharekey, klen, checksum, &checksumlen);
+
+	/*(if (!SM2_KAP_final_check(ctx, checksum, checksumlen)) {
+		printf("check fail\n");
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, ERR_R_EC_LIB);
+		//goto end;
+	}*/
+
+	if (!(ret = (*env)->NewByteArray(env, klen))) {
+		JNIerr(JNI_F_JAVA_GMSSL_CACULATESHAREDKEY, JNI_R_JNI_MALLOC_FAILURE);
+		goto end;
+	}
+
+	(*env)->SetByteArrayRegion(env, ret, 0, klen, (jbyte *)sharekey);
+
+	end:
+	if (uid) (*env)->ReleaseStringUTFChars(env, uid, uidbuf);
+	if (ruid) (*env)->ReleaseStringUTFChars(env, uid, ruidbuf);
+	if (privkeybuf) (*env)->ReleaseByteArrayElements(env, privateKey, (jbyte *)privkeybuf, JNI_ABORT);
+	if (rpubkeybuf) (*env)->ReleaseByteArrayElements(env, remotePubkey, (jbyte *)rpubkeybuf, JNI_ABORT);
+	if (emprikeybuf) (*env)->ReleaseByteArrayElements(env, ephemeralPrivKey, (jbyte *)emprikeybuf, JNI_ABORT);
+	if (repubkeybuf) (*env)->ReleaseByteArrayElements(env, remoteEphemeralPubkey, (jbyte *)repubkeybuf, JNI_ABORT);
+	OPENSSL_free(sharekey);
+	return ret;
+}
+
 
 int pke_nids[] = {
 #ifndef OPENSSL_NO_RSA

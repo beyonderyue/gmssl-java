@@ -47,6 +47,11 @@ public class SM2 {
         return plainText;
     }
 
+    public static byte[] calculateSharedKey(byte[] privateKey, byte[] emprivateKey, String uid,
+                                            byte[] pubKey, byte[] empheralpubKey, String ruid, int klen, int initiator) {
+        return gmSSL.calculateSharedKey(privateKey, emprivateKey, uid, pubKey, empheralpubKey, ruid, klen, initiator);
+    }
+
 
 
 }

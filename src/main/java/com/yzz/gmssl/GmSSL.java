@@ -77,5 +77,6 @@ public class GmSSL {
     public native String[] getErrorStrings();
     public native byte[] generateKeyPair(boolean compressed);
     public native byte[] getPublicKey(byte[] privKey, boolean compressed);
+    public native byte[] calculateSharedKey(byte[] privateKey, byte[] ephemeralPrivKey, String uid, byte[] remotePublickey, byte[] remoteEphemeralPubkey, String ruid, int keylen, int initiator);
 }
 

@@ -1,4 +1,5 @@
 # gmssl-java
-GMSSL Java warpper
+GMSSL Java wrpper
 
-JNI library just support MAC now
+The jni library compiled in https://github.com/beyonderyue/GmSSL/tree/master/java
+If you change java package name, you should change the file GmSSL.c accordingly.
